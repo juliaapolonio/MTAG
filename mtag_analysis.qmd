@@ -1,0 +1,133 @@
+---
+title: "MTAG_analysis"
+format: html
+editor: visual
+---
+
+## MTAG Analysis Workflow
+
+#### Step 1: Setup and run jvfe-LDSC pipeline to get traits of interest
+
+```{bash}
+
+#!/bin/bash
+echo "Today is " `date`
+echo $PWD
+```
+
+#### Step 2: Setup LDSC on machine
+
+```{bash}
+# Clone and install LDSC
+git clone https://github.com/bulik/ldsc.git
+cd ldsc
+git checkout b02f2a6
+conda env create --file environment.yml
+source activate ldsc
+
+# Get european reference files
+wget https://zenodo.org/records/7768714/files/1000G_Phase3_baselineLD_v2.2_ldscores.tgz
+tar -xvzf 1000G_Phase3_baselineLD_v2.2_ldscores.tgz
+mkdir eur_w_ld_chr
+mv baselineLD* eur_w_ld_chr
+
+# Get snp list
+wget https://ibg.colorado.edu/cdrom2021/Day06-nivard/GenomicSEM_practical/eur_w_ld_chr/w_hm3.snplist
+
+```
+
+#### Step 3: Format sumstats to LDSC format
+
+```{r}
+
+library(vroom)
+library(dplyr)
+setwd("~/scripts/bash/")
+
+# Get file names from command line arguments or environment variables
+sumstats_file <- ifelse(length(Sys.getenv("SUMSTATS_FILE")) > 0, Sys.getenv("SUMSTATS_FILE"), "test_sumstats.tsv")
+
+variants_file <- "variants.tsv"
+
+# Read data from files
+sumstats <- vroom(sumstats_file, col_select = c("variant", "beta", "se", "pval", "n_complete_samples"))
+ref <- vroom(variants_file, col_select = c("variant" ,"rsid", "chr", "ref", "alt"))
+
+# Perform the join and selection
+ldsc <- sumstats %>%
+  inner_join(ref, by = "variant") %>%
+  dplyr::select(SNP=rsid, CHR=chr, A1=ref, A2=alt, P=pval, BETA=beta, N=n_complete_samples)
+
+# Write the result to a file
+output_file <- ifelse(length(commandArgs(trailingOnly = TRUE)) >= 3,
+                      commandArgs(trailingOnly = TRUE)[3],
+                      ifelse(length(Sys.getenv("OUTPUT_FILE")) > 0, Sys.getenv("OUTPUT_FILE"), "test_sumstats_ldsc.tsv"))
+
+vroom_write(ldsc, output_file)
+```
+
+#### Step 4: Munge sumstats with LDSC
+
+```{bash}
+
+# Munge sumstats files. File must contain only "SNP","A1","A2","N","P","BETA or OR or Z". Should use this exact header notation
+conda activate ldsc
+
+./munge_sumstats.py \
+--sumstats ../data/sumstats/townsend_hg19_sumstats.txt \
+--merge-alleles w_hm3.snplist \
+--out ../data/outputs/ldsc_munge/tow \
+--chunksize 500000
+
+./munge_sumstats.py \
+--sumstats ../data/sumstats/townsend_hg19_sumstats.txt \
+--merge-alleles w_hm3.snplist \
+--out ../data/outputs/ldsc_munge/tow \
+--chunksize 500000
+```
+
+#### Step 5: Run LDSC with chosen traits
+
+```{bash}
+conda activate ldsc
+
+./ldsc.py --rg ../data/sumstats/pgcdep.sumstats.gz,../data/outputs/ldsc-munge/tow.sumstats.gz --ref-ld-chr eur_w_ld_chr/ --w-ld-chr 1000G_weights/1000G_Phase3_weights_hm3_no_MHC/ --out ../data/outputs/ldsc/tow_sdep
+
+```
+
+#### Step 5: Setup MTAG on machine
+
+```{bash}
+
+git clone https://github.com/omeed-maghzian/mtag.git
+cd mtag
+conda env create -f mtag_env.yml
+```
+
+#### Step 6: Run MTAG with all traits for Broad DEP and Strict DEP
+
+```{bash}
+
+conda activate mtag
+python mtag.py --sumstats ../data/sumstats/depression_sumstats.txt,../data/sumstats/adhd_sumstats_mtag.txt,../data/sumstats/anxiety_sumstats_mtag.txt,../data/sumstats/bipolar_sumstats_mtag.txt,../data/sumstats/insomnia_sumstats_mtag.txt,../data/sumstats/neuroticism_sumstats.txt,../data/sumstats/wellbeing_sumstats.txt,../data/townsend_sumstats_mtag.txt --out ../data/outputs/mtag/dep_new   --snp_name variant_id --a1_name effect_allele --a2_name other_allele --eaf_name effect_allele_frequency --z_name z_score --beta_name beta --se_name standard_error   --n_name n --chr_name chromosome --bpos_name base_pair_location --stream_stdout --fdr --force --stream_stdout --n_approx --intervals 5 --cores 8
+```
+
+#### Step 7: Put MTAG results on FUMA
+
+| Parameter   | Value          |
+|-------------|----------------|
+| FUMA        | v1.5.2         |
+| MAGMA       | v1.08          |
+| GWASCatalog | e0_r2022-11-29 |
+| ANNOVAR     | 2017-07-17     |
+| chrcol      | CHR            |
+| poscol      | BP             |
+| rsIDcol     | SNP            |
+| pcol        | mtag_pval      |
+| eacol       | A1             |
+| neacol      | A2             |
+| orcol       | NA             |
+| becol       | mtag_beta      |
+| secol       | mtag_se        |
+
+: FUMA Parameters
