@@ -6,7 +6,11 @@ editor: visual
 
 ## MTAG Analysis Workflow
 
+This was roughly the methodology I was using in my MTAG analysis. It was written in a Quarto document just for the sake of rendering a document with code chunks from different languages.
+
 #### Step 1: Setup and run jvfe-LDSC pipeline to get traits of interest
+
+This is an optional step. If you want to have a broader behaviour of the genetic correlation between a big number of traits, this nextflow workflow can be quite handy. It calculates the genetic correlation between GWAS sumstats from [Neale's lab UKB GWAS](https://github.com/Nealelab/UK_Biobank_GWAS) More info about it at [jfve's github page](https://github.com/jvfe/jvfe-ldsc).
 
 ```{bash}
 
@@ -34,6 +38,8 @@ nextflow run jvfe/jvfe-ldsc \
 
 #### Step 2: Setup LDSC on machine
 
+Here are all files/setup needed to run LDSC in your machine. The links can expire, and if this happens you can check for [LDSC's repository issues](https://github.com/bulik/ldsc/issues) to find more updated links.
+
 ```{bash}
 # Clone and install LDSC
 git clone https://github.com/bulik/ldsc.git
@@ -55,11 +61,12 @@ wget https://ibg.colorado.edu/cdrom2021/Day06-nivard/GenomicSEM_practical/eur_w_
 
 #### Step 3: Format sumstats to LDSC format
 
+An R script that I used to get my sumstats to LDSC format. But it may vary depending on the sumstats you have. Just keep in mind you need SNP A1 A2 P BETA N columns, SNP being in the rsID format. A broader formating script is under development.
+
 ```{r}
 
 library(vroom)
 library(dplyr)
-setwd("~/scripts/bash/")
 
 # Get file names from command line arguments or environment variables
 sumstats_file <- ifelse(length(Sys.getenv("SUMSTATS_FILE")) > 0, Sys.getenv("SUMSTATS_FILE"), "test_sumstats.tsv")
@@ -85,9 +92,12 @@ vroom_write(ldsc, output_file)
 
 #### Step 4: Munge sumstats with LDSC
 
+LDSC is very strict with the input format, so it has its own munging algorithm. You have to run it for both sumstats you want to calculate the genetic correlation. If you have an INFO column with the imputation score of the SNPs, remove the --merge-alleles option.
+
 ```{bash}
 
 # Munge sumstats files. File must contain only "SNP","A1","A2","N","P","BETA or OR or Z". Should use this exact header notation
+
 conda activate ldsc
 
 ./munge_sumstats.py \
@@ -105,7 +115,10 @@ conda activate ldsc
 
 #### Step 5: Run LDSC with chosen traits
 
+This is the LDSC run itself with the munged sumstats. It will return a log file with the genetic correlation result. Mae sure you have the right data paths as inputs.
+
 ```{bash}
+
 conda activate ldsc
 
 ./ldsc.py --rg ../data/sumstats/pgcdep.sumstats.gz,../data/outputs/ldsc-munge/tow.sumstats.gz --ref-ld-chr eur_w_ld_chr/ --w-ld-chr 1000G_weights/1000G_Phase3_weights_hm3_no_MHC/ --out ../data/outputs/ldsc/tow_sdep
@@ -114,14 +127,18 @@ conda activate ldsc
 
 #### Step 6: Setup MTAG on machine
 
+Just clone the repository and create a [conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) environment based on the recipe inside it. 
+
 ```{bash}
 
 git clone https://github.com/omeed-maghzian/mtag.git
 cd mtag
-conda env create -f mtag_env.yml
+conda env create -f environment.yml
 ```
 
 #### Step 7: Run MTAG with all traits for Broad DEP and Strict DEP
+
+This is the multi-trait analysis itself. Replace the inputs with the right path to the sumstats. The --n_approx, --intervals --cores parameters are only necessary if you are using a high number of traits (more than 5) and you want MTAG to perform the MaxFDR calculations.
 
 ```{bash}
 
@@ -130,6 +147,9 @@ python mtag.py --sumstats ../data/sumstats/depression_sumstats.txt,../data/sumst
 ```
 
 #### Step 8: Put MTAG results on FUMA
+
+FUMA software can be found at https://fuma.ctglab.nl/
+Create an account and start a new job. Upload your sumstats and use the following parameters:
 
 | Parameter   | Value          |
 |-------------|----------------|
@@ -148,3 +168,5 @@ python mtag.py --sumstats ../data/sumstats/depression_sumstats.txt,../data/sumst
 | secol       | mtag_se        |
 
 : FUMA Parameters
+
+FUMA will clump the data to find Independent signal SNPs and Lead SNPs, plot Manhattan and Q-Q plots, perform Gene-set analysis using MAGMA, and tissue expression analysis using GTEx data. It also annotates the variants with Annovar, and map eQTLs and Chromatin interactions.
